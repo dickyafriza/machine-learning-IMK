@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import re, os, io, chardet, joblib
+import re, os, chardet, joblib
 from io import StringIO
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder
@@ -12,9 +12,9 @@ from sklearn.ensemble import RandomForestClassifier
 st.set_page_config(page_title="Klasifikasi KBLI C (2 digit)", page_icon="🧭", layout="wide")
 
 st.title("Klasifikasi KBLI C (2 digit)")
-st.caption("Upload CSV, proses pembersihan ringan, klasifikasi 2 digit (C), aturan iteratif, lalu unduh hasil.")
+st.caption("Upload CSV, pembersihan ringan, klasifikasi 2 digit (C), koreksi aturan, dan unduh hasil.")
 
-# ----------------- Util & caching -----------------
+# ----------------- Utils -----------------
 @st.cache_data(show_spinner=False)
 def detect_and_read_csv(file_bytes: bytes):
     enc = (chardet.detect(file_bytes)['encoding'] or 'utf-8')
@@ -67,19 +67,22 @@ label_map = {
  '33':'Jasa Reparasi dan Pemasangan Mesin dan Peralatan'
 }
 
-def apply_iterative_rules_simple(df, cols, max_iters=3, conf_thr=0.70):
+def apply_iterative_rules_simple(df, cols, max_iters=3, conf_thr=0.80):
     txt = df[cols].fillna('').agg(' '.join, axis=1).str.upper()
     rules = [
+        # Positif makanan/minuman dulu
+        (r'\b(TEPUNG|BERAS|KUE|ROTI|BOLU|BISKUIT|KERIPIK|ABON|DODOL|GETHUK|TAHU|TEMPE|TAPAI|SAMBAL|SAUS|KECAP|MIE|SELAI|SIRUP|ES|MANISAN|BUBUR|BROWNIES|RENDANG|SERUNDENG)\b', '10'),
+        (r'\b(AIR MINUM|MINUMAN|SARI BUAH|JUS|KOPI|TEH|SODA|SUSU|YOGURT|SIRUP)\b', '11'),
+        # Lain-lain
         (r'\bKABEL\b|\bTRAFO\b|\bAMPLI(FIER)?\b|\bINVERTER\b', '27'),
         (r'\bCPU\b|\bLAPTOP\b|\bKAMERA\b|\bOPTIK\b', '26'),
         (r'\bMESIN\b|\bDINAMO\b|\bPOMPA\b|\bKOMPRESOR\b', '28'),
         (r'\bKURSI\b|\bMEJA\b|\bLEMARI\b', '31'),
         (r'\bKERTAS\b|\bAGENDA MAP\b', '17'),
         (r'\bCETAK\b|\bPERCETAKAN\b|\bUNDANGAN\b|\bSTIKER\b', '18'),
-        (r'\bLEM\b|\bCAT\b|\bRESIN\b', '20'),
-        (r'\bKARET\b|\bPLASTIK\b', '22'),
-        (r'\bTEPUNG\b|\bSINGKONG\b|\bBERAS\b|\bKUE\b|\bTEMPE\b|\bGETHUK\b|\bTAHU\b', '10'),
-        (r'\bAIR MINUM\b|\bSIRUP\b|\bMINUMAN\b', '11'),
+        (r'\b(LEM|CAT|RESIN)\b', '20'),
+        # Karet/Plastik lebih spesifik dan diletakkan belakangan
+        (r'\b(KARET|PLASTIK)\b.*\b(PIPA|SELANG|MOLD|MOLDING|INJECTION|PACKAGING|PE|PP|PVC|LISTRIK|SEAL)\b', '22'),
     ]
     changed, it = True, 0
     out2 = df.copy()
@@ -94,34 +97,20 @@ def apply_iterative_rules_simple(df, cols, max_iters=3, conf_thr=0.70):
                 changed = True
     return out2
 
-def build_or_load_pipeline(X_all, y_series):
-    # Coba muat model tersimpan jika ada
+@st.cache_resource(show_spinner=False)
+def build_or_load_pipeline(feature_names):
     if os.path.exists('model_kbli2_rf.joblib'):
         try:
             pipe = joblib.load('model_kbli2_rf.joblib')
             return pipe
         except Exception:
             pass
-    # Jika tidak ada model, latih ringan agar pipeline hidup
-    ct = ColumnTransformer([('cat', OneHotEncoder(handle_unknown='ignore', min_frequency=5), X_all.columns.tolist())])
+    ct = ColumnTransformer([('cat', OneHotEncoder(handle_unknown='ignore', min_frequency=5), feature_names)])
     rf = RandomForestClassifier(n_estimators=500, random_state=42, class_weight='balanced_subsample', n_jobs=-1)
     pipe = Pipeline([('prep', ct), ('clf', rf)])
-    has_y = y_series.notna().sum() >= 50 and y_series.nunique() >= 2
-    if has_y:
-        y_t = y_series
-        vc = y_t.value_counts()
-        ok = y_t.isin(vc[vc>=2].index)
-        if ok.sum() >= 2 and vc[vc>=2].shape[0] >= 2:
-            pipe.fit(X_all[ok], y_t[ok])
-        else:
-            pipe.fit(X_all, y_t)
-    else:
-        rng = np.random.default_rng(42)
-        fake_y = rng.choice([f'{i:02d}' for i in range(10,34)], size=len(X_all))
-        pipe.fit(X_all, fake_y)
     return pipe
 
-# ----------------- UI Upload -----------------
+# ----------------- UI -----------------
 uploaded = st.file_uploader("Upload CSV (boleh kotor/bersih)", type=["csv"])
 proses = st.button("Proses")
 
@@ -129,10 +118,12 @@ if uploaded and proses:
     file_bytes = uploaded.read()
     df = detect_and_read_csv(file_bytes)
 
+    # Split r213
     if 'r213' in df.columns:
         sp = split_business_owner(df['r213'])
         df = pd.concat([df.drop(columns=['r213']), sp], axis=1)
 
+    # Target kbli2_true
     if 'r216_value' in df.columns:
         df['kbli2_true'] = df['r216_value'].astype(str).str.extract(r'(\d{2})')
     elif 'r216_label' in df.columns:
@@ -140,15 +131,31 @@ if uploaded and proses:
     else:
         df['kbli2_true'] = np.nan
 
+    # Fitur
     feat_cols = [c for c in ['r215a1_label','r215b','r215d'] if c in df.columns]
     if not feat_cols:
         st.error("Tidak ditemukan kolom r215a1_label / r215b / r215d.")
         st.stop()
-
     X_all = df[feat_cols].fillna('')
 
-    pipe = build_or_load_pipeline(X_all, df['kbli2_true'])
+    # Model: load jika ada, jika tidak latih cepat bila tersedia y
+    pipe = build_or_load_pipeline(feat_cols)
+    has_y = df['kbli2_true'].notna().sum() >= 50 and df['kbli2_true'].nunique() >= 2
+    if has_y:
+        y_t = df.loc[df['kbli2_true'].notna(), 'kbli2_true']
+        vc = y_t.value_counts()
+        ok = y_t.isin(vc[vc>=2].index)
+        if ok.sum() >= 2 and vc[vc>=2].shape[0] >= 2:
+            pipe.fit(X_all[ok], y_t[ok])
+        else:
+            pipe.fit(X_all, y_t)
+    else:
+        # fallback supaya pipeline hidup
+        rng = np.random.default_rng(42)
+        fake_y = rng.choice([f'{i:02d}' for i in range(10,34)], size=len(X_all))
+        pipe.fit(X_all, fake_y)
 
+    # Prediksi
     pred = pipe.predict(X_all)
     proba = pipe.predict_proba(X_all).max(axis=1)
 
@@ -157,8 +164,10 @@ if uploaded and proses:
     out['kbli2_pred_label'] = out['kbli2_pred'].map(label_map)
     out['kbli2_pred_proba'] = proba
 
-    out_iter = apply_iterative_rules_simple(out, feat_cols, max_iters=3, conf_thr=0.70)
+    # Aturan iteratif (threshold dinaikkan)
+    out_iter = apply_iterative_rules_simple(out, feat_cols, max_iters=3, conf_thr=0.80)
 
+    # Status C / kesesuaian
     catC = [f"{i:02d}" for i in range(10,34)]
     out_iter['is_catC_pred'] = out_iter['kbli2_pred'].isin(catC)
     out_iter['is_catC_true'] = out_iter['kbli2_true'].isin(catC)
@@ -169,6 +178,7 @@ if uploaded and proses:
                  np.where(out_iter['is_catC_pred'] & ~out_iter['is_catC_true'], 'True non-C vs Pred C', 'True non-C & Pred non-C'))
     )
 
+    # Bagi output
     klasifikasi = out_iter.copy()
     bersih = out_iter.loc[out_iter['is_catC_pred'] & out_iter['is_catC_true'] & (~mismatch)].copy()
     anomali = out_iter.loc[(~out_iter['is_catC_pred']) | (~out_iter['is_catC_true']) | mismatch].copy()
@@ -178,18 +188,19 @@ if uploaded and proses:
             if col not in dfx.columns and col in df.columns:
                 dfx[col] = df[col]
 
+    # Preview
     st.subheader("Preview")
     st.write("Klasifikasi", klasifikasi.head(20))
     st.write("Bersih", bersih.head(20))
     st.write("Anomali", anomali.head(20))
 
+    # Siapkan CSV dan tombol unduh
     id_cols = [c for c in ['r101','r102','r103','r104','r105','r106','r107','r206','r208'] if c in klasifikasi.columns]
     show_cols = id_cols + [c for c in ['nama_bisnis','nama_pemilik','r215a1_label','r215b','r215d','r216_label','kbli2_true','kbli2_pred','kbli2_pred_label','kbli2_pred_proba','status_kesesuaian'] if c in klasifikasi.columns]
     bersih_cols = id_cols + [c for c in ['nama_bisnis','nama_pemilik','r215a1_label','r215b','r215d','r216_label','kbli2_pred','kbli2_pred_label'] if c in bersih.columns]
 
     klasifikasi_csv = klasifikasi[show_cols].to_csv(index=False).encode('utf-8')
     bersih_csv = bersih[bersih_cols].to_csv(index=False).encode('utf-8')
-    anomali_csv = klasifikasi[show_cols].copy()
     anomali_csv = anomali[show_cols].to_csv(index=False).encode('utf-8')
 
     st.download_button("Unduh klasifikasi.csv", klasifikasi_csv, file_name="klasifikasi.csv", mime="text/csv")
