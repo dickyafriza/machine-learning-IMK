@@ -11,8 +11,8 @@ from sklearn.ensemble import RandomForestClassifier
 
 st.set_page_config(page_title="Klasifikasi KBLI C (2 digit)", page_icon="🧭", layout="wide")
 
-st.title("Klasifikasi KBLI C (2 digit)")
-st.caption("Upload CSV, pembersihan ringan, klasifikasi 2 digit (C), koreksi aturan, dan unduh hasil.")
+st.title("Klasifikasi KBLI Kategori C (2 digit)")
+st.caption("Upload CSV, pembersihan ringan, klasifikasi 2 digit (Ketgori C), koreksi aturan, dan unduh hasil.")
 
 # ----------------- Utils -----------------
 @st.cache_data(show_spinner=False)
