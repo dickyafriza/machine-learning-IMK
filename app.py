@@ -12,7 +12,7 @@ from sklearn.ensemble import RandomForestClassifier
 import joblib
 
 st.set_page_config(page_title="Klasifikasi KBLI 2 Digit", layout="wide")
-st.title("Klasifikasi KBLI C 2 Digit")
+st.title("Klasifikasi KBLI 2 Digit dari Teks")
 
 st.write(
     "Upload file CSV/Excel berisi kolom r215a1_label / r215b / r215d, "
@@ -24,7 +24,7 @@ uploaded_file = st.file_uploader(
     type=["csv", "xlsx", "xls"]
 )
 
-# ========= Fungsi util dari notebook =========
+# ========= Fungsi util =========
 
 def split_business_owner(series):
     angle_pat = re.compile(r'<([^<>]*)>')
@@ -99,7 +99,7 @@ def apply_iterative_rules_simple(df, cols, max_iters=3, conf_thr=0.70):
 if uploaded_file is not None:
     file_name = uploaded_file.name.lower()
 
-    # --- Baca file: beda antara CSV vs Excel ---
+    # --- Baca file: CSV vs Excel ---
     if file_name.endswith(".csv"):
         raw_bytes = uploaded_file.getvalue()
         enc = (chardet.detect(raw_bytes)['encoding'] or 'utf-8')
@@ -114,8 +114,8 @@ if uploaded_file is not None:
             lines.pop(0)
         df = pd.read_csv(StringIO('\n'.join(lines)))
     else:
-        # Excel dibaca langsung
-        df = pd.read_excel(uploaded_file)  # [web:30][web:33]
+        # BUTUH openpyxl di requirements.txt
+        df = pd.read_excel(uploaded_file)  # [web:33][web:46]
 
     # Normalisasi kolom
     df.columns = [str(c).strip() for c in df.columns]
@@ -245,7 +245,6 @@ if uploaded_file is not None:
     st.subheader("Preview hasil klasifikasi")
     st.dataframe(klasifikasi[show_cols].head())
 
-    # Download
     st.subheader("Download hasil")
 
     klasifikasi_csv = klasifikasi[show_cols].to_csv(index=False).encode("utf-8")
@@ -258,14 +257,12 @@ if uploaded_file is not None:
         file_name="klasifikasi_r216_vs_textC.csv",
         mime="text/csv"
     )
-
     st.download_button(
         "Download bersih (kategori C sesuai)",
         data=bersih_csv,
         file_name="bersih_textC.csv",
         mime="text/csv"
     )
-
     st.download_button(
         "Download anomali",
         data=anomali_csv,
