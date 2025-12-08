@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
-import os
 import chardet
 from io import StringIO
 from sklearn.model_selection import train_test_split
@@ -12,17 +11,20 @@ from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
 import joblib
 
-st.set_page_config(page_title="Klasifikasi KBLI2", layout="wide")
+st.set_page_config(page_title="Klasifikasi KBLI 2 Digit", layout="wide")
 st.title("Klasifikasi KBLI 2 Digit dari Teks")
 
-st.write("Upload file CSV/Excel berisi kolom r215a1_label / r215b / r215d, dan jika ada r216_value / r216_label untuk training/evaluasi.")
+st.write(
+    "Upload file CSV/Excel berisi kolom r215a1_label / r215b / r215d, "
+    "dan jika ada r216_value / r216_label untuk training/evaluasi."
+)
 
 uploaded_file = st.file_uploader(
     "Upload file CSV atau Excel",
     type=["csv", "xlsx", "xls"]
 )
 
-# ====== Fungsi util dari notebook ======
+# ========= Fungsi util dari notebook =========
 
 def split_business_owner(series):
     angle_pat = re.compile(r'<([^<>]*)>')
@@ -45,9 +47,13 @@ def split_business_owner(series):
         biz.append(name_clean)
         owner_main.append(owners[0] if owners else '')
         owner_others.append(', '.join(owners[1:]) if len(owners) > 1 else '')
-    return pd.DataFrame({'nama_bisnis': biz,
-                         'nama_pemilik': owner_main,
-                         'nama_pemilik_lain': owner_others})
+    return pd.DataFrame(
+        {
+            'nama_bisnis': biz,
+            'nama_pemilik': owner_main,
+            'nama_pemilik_lain': owner_others
+        }
+    )
 
 label_map = {
  '10':'Industri Makanan','11':'Industri Minuman','12':'Industri Pengolahan Tembakau','13':'Industri Tekstil',
@@ -78,7 +84,7 @@ def apply_iterative_rules_simple(df, cols, max_iters=3, conf_thr=0.70):
     changed, it = True, 0
     out2 = df.copy()
     while changed and it < max_iters:
-        changed, it = False, it+1
+        changed, it = False, it + 1
         cand = (out2['kbli2_pred_proba'] < conf_thr)
         for pattern, target in rules:
             m = cand & txt.str.contains(pattern, regex=True, na=False) & (out2['kbli2_pred'] != target)
@@ -88,27 +94,37 @@ def apply_iterative_rules_simple(df, cols, max_iters=3, conf_thr=0.70):
                 changed = True
     return out2
 
-# ====== Proses jika file sudah diupload ======
-if uploaded_file is not None:
-    # Baca bytes untuk deteksi encoding kasar
-    raw_bytes = uploaded_file.getvalue()
-    enc = (chardet.detect(raw_bytes)['encoding'] or 'utf-8')
-    text = raw_bytes.decode(enc, errors='replace')
-    text = text.lstrip('\ufeff').replace('\r\n','\n').replace('\r','\n')
-    lines = text.split('\n')
-    while lines and (lines[0].strip().startswith('**') or
-                     lines[0].strip().lower().startswith('mohon') or
-                     lines[0].strip().lower().startswith('catatan')):
-        lines.pop(0)
-    df = pd.read_csv(StringIO('\n'.join(lines)))
+# ========= Proses utama =========
 
+if uploaded_file is not None:
+    file_name = uploaded_file.name.lower()
+
+    # --- Baca file: beda antara CSV vs Excel ---
+    if file_name.endswith(".csv"):
+        raw_bytes = uploaded_file.getvalue()
+        enc = (chardet.detect(raw_bytes)['encoding'] or 'utf-8')
+        text = raw_bytes.decode(enc, errors='replace')
+        text = text.lstrip('\ufeff').replace('\r\n', '\n').replace('\r', '\n')
+        lines = text.split('\n')
+        while lines and (
+            lines[0].strip().startswith('**')
+            or lines[0].strip().lower().startswith('mohon')
+            or lines[0].strip().lower().startswith('catatan')
+        ):
+            lines.pop(0)
+        df = pd.read_csv(StringIO('\n'.join(lines)))
+    else:
+        # Excel dibaca langsung
+        df = pd.read_excel(uploaded_file)  # [web:30][web:33]
+
+    # Normalisasi kolom
     df.columns = [str(c).strip() for c in df.columns]
     for c in df.columns:
         if df[c].dtype == object:
             df[c] = df[c].astype(str).str.strip()
 
     st.subheader("Preview data mentah")
-    st.write(df.head())
+    st.dataframe(df.head())
 
     # Split r213
     if 'r213' in df.columns:
@@ -123,9 +139,9 @@ if uploaded_file is not None:
     else:
         df['kbli2_true'] = np.nan
 
-    feat_cols = [c for c in ['r215a1_label','r215b','r215d'] if c in df.columns]
+    feat_cols = [c for c in ['r215a1_label', 'r215b', 'r215d'] if c in df.columns]
     if not feat_cols:
-        st.error('Tidak ditemukan kolom r215a1_label / r215b / r215d.')
+        st.error("Tidak ditemukan kolom r215a1_label / r215b / r215d.")
         st.stop()
 
     X_all = df[feat_cols].fillna('')
@@ -147,8 +163,8 @@ if uploaded_file is not None:
         X_t = df.loc[df['kbli2_true'].notna(), feat_cols].fillna('')
         y_t = df.loc[df['kbli2_true'].notna(), 'kbli2_true']
         vc = y_t.value_counts()
-        ok = y_t.isin(vc[vc>=2].index)
-        if ok.sum() >= 2 and vc[vc>=2].shape[0] >= 2:
+        ok = y_t.isin(vc[vc >= 2].index)
+        if ok.sum() >= 2 and vc[vc >= 2].shape[0] >= 2:
             X_tr, X_te, y_tr, y_te = train_test_split(
                 X_t[ok], y_t[ok],
                 test_size=0.2,
@@ -161,7 +177,10 @@ if uploaded_file is not None:
             pipe.fit(X_t, y_t)
             st.warning("Model dilatih tanpa split (kelas jarang).")
     else:
-        pipe.fit(X_all, np.random.choice([f'{i:02d}' for i in range(10,34)], size=len(X_all)))
+        pipe.fit(
+            X_all,
+            np.random.choice([f"{i:02d}" for i in range(10, 34)], size=len(X_all))
+        )
         st.info("Tidak cukup label r216, model hanya difit dummy agar bisa prediksi.")
 
     # Prediksi
@@ -175,14 +194,20 @@ if uploaded_file is not None:
 
     out_iter = apply_iterative_rules_simple(out, feat_cols, max_iters=3, conf_thr=0.70)
 
-    catC = [f"{i:02d}" for i in range(10,34)]
+    catC = [f"{i:02d}" for i in range(10, 34)]
     out_iter['is_catC_pred'] = out_iter['kbli2_pred'].isin(catC)
     out_iter['is_catC_true'] = out_iter['kbli2_true'].isin(catC)
     mismatch = out_iter['kbli2_true'].notna() & (out_iter['kbli2_true'] != out_iter['kbli2_pred'])
     out_iter['status_kesesuaian'] = np.where(
         out_iter['is_catC_pred'] & out_iter['is_catC_true'] & (~mismatch), 'Sesuai C',
-        np.where(~out_iter['is_catC_pred'] & out_iter['is_catC_true'], 'True C vs Pred non-C',
-                 np.where(out_iter['is_catC_pred'] & ~out_iter['is_catC_true'], 'True non-C vs Pred C', 'True non-C & Pred non-C'))
+        np.where(
+            ~out_iter['is_catC_pred'] & out_iter['is_catC_true'], 'True C vs Pred non-C',
+            np.where(
+                out_iter['is_catC_pred'] & ~out_iter['is_catC_true'],
+                'True non-C vs Pred C',
+                'True non-C & Pred non-C'
+            )
+        )
     )
 
     klasifikasi = out_iter.copy()
@@ -194,26 +219,33 @@ if uploaded_file is not None:
     ].copy()
 
     for dfx in [klasifikasi, bersih, anomali]:
-        for col in ['r215a1_label','r215b','r215d','r216_label']:
+        for col in ['r215a1_label', 'r215b', 'r215d', 'r216_label']:
             if col not in dfx.columns and col in df.columns:
                 dfx[col] = df[col]
 
-    id_cols = [c for c in ['r101','r102','r103','r104','r105','r106','r107','r206','r208'] if c in klasifikasi.columns]
-    show_cols = id_cols + [c for c in [
-        'nama_bisnis','nama_pemilik','r215a1_label','r215b','r215d',
-        'r216_label','kbli2_true','kbli2_pred','kbli2_pred_label',
-        'kbli2_pred_proba','status_kesesuaian'
-    ] if c in klasifikasi.columns]
-
-    bersih_cols = id_cols + [c for c in [
-        'nama_bisnis','nama_pemilik','r215a1_label','r215b','r215d',
-        'r216_label','kbli2_pred','kbli2_pred_label'
-    ] if c in bersih.columns]
+    id_cols = [
+        c for c in ['r101', 'r102', 'r103', 'r104', 'r105',
+                    'r106', 'r107', 'r206', 'r208']
+        if c in klasifikasi.columns
+    ]
+    show_cols = id_cols + [
+        c for c in [
+            'nama_bisnis', 'nama_pemilik', 'r215a1_label', 'r215b', 'r215d',
+            'r216_label', 'kbli2_true', 'kbli2_pred', 'kbli2_pred_label',
+            'kbli2_pred_proba', 'status_kesesuaian'
+        ] if c in klasifikasi.columns
+    ]
+    bersih_cols = id_cols + [
+        c for c in [
+            'nama_bisnis', 'nama_pemilik', 'r215a1_label', 'r215b', 'r215d',
+            'r216_label', 'kbli2_pred', 'kbli2_pred_label'
+        ] if c in bersih.columns
+    ]
 
     st.subheader("Preview hasil klasifikasi")
     st.dataframe(klasifikasi[show_cols].head())
 
-    # ====== Tombol download (masing-masing CSV) ======
+    # Download
     st.subheader("Download hasil")
 
     klasifikasi_csv = klasifikasi[show_cols].to_csv(index=False).encode("utf-8")
@@ -241,7 +273,6 @@ if uploaded_file is not None:
         mime="text/csv"
     )
 
-    # Opsional: simpan model di server (bukan auto-download)
     if st.checkbox("Simpan model ke file .joblib di server"):
         joblib.dump(pipe, 'model_kbli2_rf.joblib')
         st.success("Model disimpan sebagai model_kbli2_rf.joblib")
