@@ -12,7 +12,7 @@ from sklearn.ensemble import RandomForestClassifier
 import joblib
 
 st.set_page_config(page_title="Klasifikasi KBLI 2 Digit", layout="wide")
-st.title("Klasifikasi KBLI C 2 Digit")
+st.title("Klasifikasi KBLI 2 Digit dari Teks")
 
 st.write(
     "Upload file CSV/Excel berisi kolom r215a1_label / r215b / r215d, "
@@ -99,7 +99,7 @@ def apply_iterative_rules_simple(df, cols, max_iters=3, conf_thr=0.70):
 if uploaded_file is not None:
     file_name = uploaded_file.name.lower()
 
-    # --- Baca file: CSV vs Excel ---
+    # Baca file: CSV vs Excel
     if file_name.endswith(".csv"):
         raw_bytes = uploaded_file.getvalue()
         enc = (chardet.detect(raw_bytes)['encoding'] or 'utf-8')
@@ -114,8 +114,8 @@ if uploaded_file is not None:
             lines.pop(0)
         df = pd.read_csv(StringIO('\n'.join(lines)))
     else:
-        # BUTUH openpyxl di requirements.txt
-        df = pd.read_excel(uploaded_file)  # [web:33][web:46]
+        # pastikan 'openpyxl' ada di requirements.txt
+        df = pd.read_excel(uploaded_file)  [web:33][web:46]
 
     # Normalisasi kolom
     df.columns = [str(c).strip() for c in df.columns]
@@ -218,8 +218,13 @@ if uploaded_file is not None:
         (~out_iter['is_catC_pred']) | (~out_iter['is_catC_true']) | mismatch
     ].copy()
 
+    # Pastikan kolom-kolom utama ada di semua output,
+    # termasuk r213 agar sama dengan contoh bersih_textC*.csv
     for dfx in [klasifikasi, bersih, anomali]:
-        for col in ['r215a1_label', 'r215b', 'r215d', 'r216_label']:
+        for col in ['r101','r102','r103','r104','r105','r106','r107',
+                    'r213','r215a1_label','r215b','r215d','r216_label',
+                    'kbli2_true','kbli2_pred','kbli2_pred_label',
+                    'kbli2_pred_proba','status_kesesuaian']:
             if col not in dfx.columns and col in df.columns:
                 dfx[col] = df[col]
 
@@ -235,12 +240,17 @@ if uploaded_file is not None:
             'kbli2_pred_proba', 'status_kesesuaian'
         ] if c in klasifikasi.columns
     ]
-    bersih_cols = id_cols + [
-        c for c in [
-            'nama_bisnis', 'nama_pemilik', 'r215a1_label', 'r215b', 'r215d',
-            'r216_label', 'kbli2_pred', 'kbli2_pred_label'
-        ] if c in bersih.columns
+
+    # Urutan kolom bersih disesuaikan dengan contoh bersih_textC*.csv
+    bersih_cols = [
+        'r101','r102','r103','r104','r105','r106','r107',
+        'r213',
+        'r215a1_label','r215b','r215d',
+        'r216_label',
+        'kbli2_true','kbli2_pred','kbli2_pred_label',
+        'kbli2_pred_proba','status_kesesuaian'
     ]
+    bersih_cols = [c for c in bersih_cols if c in bersih.columns]  [file:62]
 
     st.subheader("Preview hasil klasifikasi")
     st.dataframe(klasifikasi[show_cols].head())
