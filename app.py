@@ -283,3 +283,4 @@ if uploaded_file is not None:
     if st.checkbox("Simpan model ke file .joblib di server"):
         joblib.dump(pipe, 'model_kbli2_rf.joblib')
         st.success("Model disimpan sebagai model_kbli2_rf.joblib")
+        
