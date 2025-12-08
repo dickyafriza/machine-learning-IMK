@@ -12,7 +12,7 @@ from sklearn.ensemble import RandomForestClassifier
 import joblib
 
 st.set_page_config(page_title="Klasifikasi KBLI 2 Digit", layout="wide")
-st.title("Klasifikasi KBLI 2 Digit dari Teks")
+st.title("Klasifikasi KBLI C 2 Digit")
 
 st.write(
     "Upload file CSV/Excel berisi kolom r215a1_label / r215b / r215d, "
