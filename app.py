@@ -235,8 +235,8 @@ if uploaded_file is not None:
             if col not in dfx.columns and col in df.columns:
                 dfx[col] = df[col]
 
-    # Urutan kolom bersih (persis seperti bersih_textC contoh)
-    bersih_cols = [
+    # Urutan kolom untuk semua output
+    ordered_cols = [
         'r101','r102','r103','r104','r105','r106','r107',
         'r213',
         'r215a1_label','r215b','r215d',
@@ -244,34 +244,24 @@ if uploaded_file is not None:
         'kbli2_true','kbli2_pred','kbli2_pred_label',
         'kbli2_pred_proba','status_kesesuaian'
     ]
-    bersih_cols = [c for c in bersih_cols if c in bersih.columns]  # [file:63]
-
-    # Kolom tampilan lengkap (klasifikasi & anomali)
-    id_cols = [c for c in ['r101','r102','r103','r104','r105','r106','r107','r206','r208']
-               if c in klasifikasi.columns]
-    show_cols = id_cols + [
-        c for c in [
-            'r213','nama_bisnis','nama_pemilik',
-            'r215a1_label','r215b','r215d',
-            'r216_label','kbli2_true','kbli2_pred','kbli2_pred_label',
-            'kbli2_pred_proba','status_kesesuaian'
-        ] if c in klasifikasi.columns
-    ]
+    bersih_cols = [c for c in ordered_cols if c in bersih.columns]      # [file:63]
+    klasifikasi_cols = [c for c in ordered_cols if c in klasifikasi.columns]
+    anomali_cols = [c for c in ordered_cols if c in anomali.columns]
 
     # =====  Tampilkan di halaman =====
     st.subheader("Data klasifikasi (lengkap)")
-    st.dataframe(klasifikasi[show_cols].head())
+    st.dataframe(klasifikasi[klasifikasi_cols].head())
 
     st.subheader("Data bersih (kategori C sesuai, format bersih_textC)")
     st.dataframe(bersih[bersih_cols].head())
 
     st.subheader("Data anomali (tidak sesuai / non-C)")
-    st.dataframe(anomali[show_cols].head())
+    st.dataframe(anomali[anomali_cols].head())
 
     # =====  Download tiga file =====
-    klasifikasi_csv = klasifikasi[show_cols].to_csv(index=False).encode("utf-8")
+    klasifikasi_csv = klasifikasi[klasifikasi_cols].to_csv(index=False).encode("utf-8")
     bersih_csv = bersih[bersih_cols].to_csv(index=False).encode("utf-8")
-    anomali_csv = anomali[show_cols].to_csv(index=False).encode("utf-8")
+    anomali_csv = anomali[anomali_cols].to_csv(index=False).encode("utf-8")
 
     st.download_button(
         "Download klasifikasi_r216_vs_textC.csv",
