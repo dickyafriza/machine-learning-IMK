@@ -101,20 +101,32 @@ def apply_iterative_rules_simple(df, cols, max_iters=3, conf_thr=0.70):
                 changed = True
     return out2
 
-# cek apakah URL benar-benar mengarah ke file gambar
+# cek apakah URL mengarah ke file gambar (foto produk)
 def is_image_url(url: str) -> bool:
     if not isinstance(url, str):
         return False
-    s = url.strip().lower()
-    if s == '' or s == 'nan':
+
+    s = url.strip()
+    if s == '' or s.lower() == 'nan':
         return False
-    # cek ekstensi umum gambar
+
+    s_low = s.lower()
+    base_no_query = s_low.split('?', 1)[0]
+
+    # 1) bucket BPS r215c (link standar dari Fasih)
+    if 'bucket1.cloud.bps.go.id' in s_low and 'r215c' in s_low:
+        return True
+
+    # 2) Google Drive file (bukan folder) -> anggap foto r215c
+    #    pola umum: https://drive.google.com/file/d/<id>/view?...
+    if 'drive.google.com' in s_low and '/file/' in s_low:
+        return True
+
+    # 3) fallback: cek ekstensi gambar umum
     img_ext = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
-    if any(s.split('?', 1)[0].endswith(ext) for ext in img_ext):
+    if base_no_query.endswith(img_ext):
         return True
-    # pola khusus bucket BPS yang memang berisi foto r215c
-    if 'bucket1.cloud.bps.go.id' in s and 'r215c' in s:
-        return True
+
     return False
 
 # ========= Proses utama =========
@@ -287,7 +299,7 @@ if uploaded_file is not None:
         has_valid_image = r215c_str.apply(is_image_url)
         no_image = ~has_valid_image      # True jika TIDAK ada gambar valid
     else:
-        no_image = pd.Series(True, index=out_iter.index)  # aman: semua dianggap tanpa gambar
+        no_image = pd.Series(True, index=out_iter.index)
 
     # =====  Bagi output =====
     klasifikasi = out_iter.copy()
