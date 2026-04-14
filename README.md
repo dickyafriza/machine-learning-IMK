@@ -1,3 +1,44 @@
+# Klasifikasi KBLI 2 Digit dari Teks
+
+Aplikasi Streamlit untuk mengklasifikasikan kode KBLI 2 digit dari teks deskripsi usaha menggunakan **TF-IDF + Random Forest** dengan GridSearchCV.
+
+---
+
+## Cara Menjalankan
+
+```bash
+# Install dependensi
+pip install -r requirements.txt
+
+# Jalankan aplikasi
+streamlit run app.py
+```
+
+---
+
+## Format File Input
+
+Upload file CSV atau Excel dengan kolom-kolom berikut:
+
+| Kolom (format lama) | Kolom (Triwulan 2026) | Keterangan |
+|---|---|---|
+| `r101`–`r107` | `prov`, `kab`, `kec`, `des`, `bs`, `sbs` | Kode wilayah |
+| `r213` | `r313` | Nama usaha & pemilik |
+| `r215a1_label` | `r316a_label` / `16a_la` | Jenis komoditas utama (label) |
+| `r215b` | `r316b` | Deskripsi produk/usaha |
+| `r215d` | `r316d` | Bahan baku / proses |
+| `r216_value` | `r316a_value` / `16a_val` | Kode KBLI (ground truth) |
+| `r216_label` | `r316a_label` / `16a_la` | Label KBLI (ground truth) |
+| `r215c_url` | `r316c_url` | URL foto produk |
+
+---
+
+## Versi Kode Sebelum Update (Original `app.py`)
+
+> Kode di bawah adalah versi **sebelum** ditambahkan alias kolom untuk mendukung format Triwulan 2026 (`r3xx`).  
+> Versi ini hanya mendukung kolom dengan prefix `r2xx` (format lama).
+
+```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -17,10 +58,8 @@ st.set_page_config(page_title="Klasifikasi KBLI 2 Digit", layout="wide")
 st.title("Klasifikasi KBLI 2 Digit dari Teks")
 
 st.write(
-    "Upload file mentah (CSV/Excel) berisi minimal kolom r101–r107 (atau prov/kab/kec/des/bs/sbs), "
-    "r213 / r313 (nama usaha), "
-    "r215a1_label / r316a_label, r215b / r316b, r215d / r316d, "
-    "r216_value / r316a_value, r216_label / r316a_label, dan r215c_url / r316c_url untuk gambar."
+    "Upload file mentah (CSV/Excel) berisi minimal kolom r101–r107, r213, "
+    "r215a1_label / r215b / r215d, r216_value / r216_label, dan r215c_url untuk gambar."
 )
 
 uploaded_file = st.file_uploader(
@@ -158,43 +197,6 @@ if uploaded_file is not None:
     for c in df.columns:
         if df[c].dtype == object:
             df[c] = df[c].astype(str).str.strip()
-
-    # ===== Alias kolom: dukung prefix r2xx (lama) DAN r3xx (Triwulan 2026) =====
-    col_aliases = {
-        # r1xx — kode wilayah (fallback dari nama pendek)
-        'r101': ['prov'],
-        'r102': ['kab'],
-        'r103': ['kec'],
-        'r104': ['des'],
-        'r105': ['bs'],
-        'r106': ['sbs'],
-        # r213 / r313 — nama usaha/pemilik
-        'r213': ['r313'],
-        # r215a1_label / r316a_label
-        'r215a1_label': ['r316a_label', '16a_la'],
-        # r215b / r316b
-        'r215b': ['r316b'],
-        # r215d / r316d
-        'r215d': ['r316d'],
-        # r216_value / r316a_value
-        'r216_value': ['r316a_value', '16a_val'],
-        # r216_label / r316a_label
-        'r216_label': ['r316a_label', '16a_la'],
-        # r215c_url / r316c_url
-        'r215c_url': ['r316c_url'],
-    }
-    for canonical, aliases in col_aliases.items():
-        if canonical not in df.columns:
-            for alias in aliases:
-                if alias in df.columns:
-                    df.rename(columns={alias: canonical}, inplace=True)
-                    break
-    # Juga map kolom wilayah pendek -> r1xx jika belum ada
-    short_to_r1 = {'prov':'r101','kab':'r102','kec':'r103','des':'r104','bs':'r105','sbs':'r106'}
-    for short, r1 in short_to_r1.items():
-        if r1 not in df.columns and short in df.columns:
-            df.rename(columns={short: r1}, inplace=True)
-    # =========================================================================
 
     st.subheader("Preview data mentah")
     st.dataframe(df.head())
@@ -456,3 +458,4 @@ if uploaded_file is not None:
     if st.checkbox("Simpan model ke file .joblib di server"):
         joblib.dump(best_model, "model_kbli2_rf_tfidf_grid.joblib")
         st.success("Model disimpan sebagai model_kbli2_rf_tfidf_grid.joblib")
+```
