@@ -122,18 +122,34 @@ def is_image_url(url: str) -> bool:
 # Deteksi format data dan mapping kolom
 def detect_and_map_columns(df):
     """Deteksi apakah data dari FASIH atau VIMK25, lalu kembalikan mapping kolom."""
-    # VIMK25 punya r316a_label, r316b, r316d, v317_lab
-    is_vimk = 'r316a_label' in df.columns or 'r316b' in df.columns or 'v317_lab' in df.columns
+    # VIMK25 punya r316a_label/r316a_value, r316b, r316d, v317_lab/r317_label
+    is_vimk = any(c in df.columns for c in [
+        'r316a_label', 'r316a_value', 'r316b', 'v317_lab', 'r317_label'
+    ])
     # FASIH punya r215a1_label, r215b, r215d, r216_label
     is_fasih = 'r215a1_label' in df.columns or 'r215b' in df.columns
 
     if is_vimk:
+        # Kolom fitur teks — coba semua kemungkinan nama kolom VIMK25
+        vimk_feat_candidates = [
+            'r316a_label', 'r316a_value', 'r316a_lain',
+            'r316b', 'r316d'
+        ]
+        feat_cols = [c for c in vimk_feat_candidates if c in df.columns]
+
+        # Kolom KBLI — bisa v317_lab atau r317_label
+        kbli_label = None
+        for candidate in ['v317_lab', 'r317_label']:
+            if candidate in df.columns:
+                kbli_label = candidate
+                break
+
         return {
             'format': 'VIMK25',
             'nama_usaha': 'r314',
-            'feat_cols': [c for c in ['r316a_label', 'r316b', 'r316d'] if c in df.columns],
+            'feat_cols': feat_cols,
             'foto_url': 'r316c_url',
-            'kbli_label': 'v317_lab',
+            'kbli_label': kbli_label,
             'kbli_value': None,
             'wilayah_cols': ['prov', 'kab', 'kec', 'des', 'bs', 'sbs'],
         }
@@ -300,13 +316,16 @@ if uploaded_file is not None:
     df['text_all'] = df[feat_cols].fillna('').agg(' '.join, axis=1)
     X_all = df[['text_all']].copy()
 
+    # Dynamically set min_df based on dataset size
+    effective_min_df = max(1, min(3, len(X_all) // 10))
+
     # --------- Pipeline dasar ---------
     ct = ColumnTransformer(
         transformers=[
             ('text', TfidfVectorizer(
                 lowercase=True,
                 ngram_range=(1, 2),
-                min_df=3
+                min_df=effective_min_df
             ), 'text_all')
         ],
         remainder='drop'
@@ -369,7 +388,8 @@ if uploaded_file is not None:
             best_model = pipe
             st.warning("Model dilatih tanpa split/grid (kelas jarang).")
     else:
-        pipe.set_params(clf__n_estimators=100, clf__class_weight='balanced')
+        pipe.set_params(clf__n_estimators=100, clf__class_weight='balanced',
+                        prep__text__min_df=1)
         pipe.fit(
             X_all,
             np.random.choice([f"{i:02d}" for i in range(10, 34)], size=len(X_all))
