@@ -420,11 +420,17 @@ if uploaded_file is not None:
             )
 
     # Prediksi + proba dengan best_model
-    pred = best_model.predict(X_all)
-    if hasattr(best_model.named_steps['clf'], "predict_proba"):
-        proba = best_model.predict_proba(X_all).max(axis=1)
+    if best_model is not None:
+        pred = best_model.predict(X_all)
+        if hasattr(best_model.named_steps['clf'], "predict_proba"):
+            proba = best_model.predict_proba(X_all).max(axis=1)
+        else:
+            proba = np.ones(len(X_all))
     else:
-        proba = np.ones(len(X_all))
+        # Fallback: default ke '32' (Industri Pengolahan Lainnya) dgn proba rendah
+        # agar rule-based bisa mengoreksi nanti
+        pred = np.full(len(X_all), '32')
+        proba = np.full(len(X_all), 0.10)
 
     out = df.copy()
     out['kbli2_pred'] = pred
