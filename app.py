@@ -471,6 +471,8 @@ if uploaded_file is not None:
     # Pemeriksaan logis sesuai pedoman VIMK25-L2
     out_iter['pemeriksaan_logis'] = check_vimk_rules(out_iter, col_map)
 
+
+
     # =====  Bagi output =====
     klasifikasi = out_iter.copy()
 
