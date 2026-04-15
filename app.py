@@ -17,8 +17,8 @@ st.set_page_config(page_title="Klasifikasi KBLI 2 Digit", layout="wide")
 st.title("Klasifikasi KBLI 2 Digit dari Teks")
 
 st.write(
-    "Upload file mentah (CSV/Excel) dari FASIH atau VIMK25. "
-    "Sistem akan otomatis mendeteksi format kolom yang digunakan."
+    "Upload file mentah (CSV/Excel) berisi minimal kolom r101–r107, r213, "
+    "r215a1_label / r215b / r215d, r216_value / r216_label, dan r215c_url untuk gambar."
 )
 
 uploaded_file = st.file_uploader(
@@ -105,128 +105,29 @@ def apply_iterative_rules_simple(df, cols, max_iters=3, conf_thr=0.70):
 def is_image_url(url: str) -> bool:
     if not isinstance(url, str):
         return False
+
     s = url.strip()
     if s == '' or s.lower() == 'nan':
         return False
+
     s_low = s.lower()
     base_no_query = s_low.split('?', 1)[0]
-    if 'bucket1.cloud.bps.go.id' in s_low and ('r215c' in s_low or 'r316c' in s_low):
+
+    # 1) bucket BPS r215c (link standar dari Fasih)
+    if 'bucket1.cloud.bps.go.id' in s_low and 'r215c' in s_low:
         return True
+
+    # 2) Google Drive file (bukan folder) -> anggap foto r215c
+    #    pola umum: https://drive.google.com/file/d/<id>/view?...
     if 'drive.google.com' in s_low and '/file/' in s_low:
         return True
+
+    # 3) fallback: cek ekstensi gambar umum
     img_ext = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
     if base_no_query.endswith(img_ext):
         return True
+
     return False
-
-# Deteksi format data dan mapping kolom
-def detect_and_map_columns(df):
-    """Deteksi apakah data dari FASIH atau VIMK25, lalu kembalikan mapping kolom."""
-    # VIMK25 punya r316a_label/r316a_value, r316b, r316d, v317_lab/r317_label
-    is_vimk = any(c in df.columns for c in [
-        'r316a_label', 'r316a_value', 'r316b', 'v317_lab', 'r317_label'
-    ])
-    # FASIH punya r215a1_label, r215b, r215d, r216_label
-    is_fasih = 'r215a1_label' in df.columns or 'r215b' in df.columns
-
-    if is_vimk:
-        # Kolom fitur teks — coba semua kemungkinan nama kolom VIMK25
-        vimk_feat_candidates = [
-            'r316a_label', 'r316a_value', 'r316a_lain',
-            'r316b', 'r316d'
-        ]
-        feat_cols = [c for c in vimk_feat_candidates if c in df.columns]
-
-        # Kolom KBLI — bisa v317_lab atau r317_label
-        kbli_label = None
-        for candidate in ['v317_lab', 'r317_label']:
-            if candidate in df.columns:
-                kbli_label = candidate
-                break
-
-        return {
-            'format': 'VIMK25',
-            'nama_usaha': 'r314',
-            'feat_cols': feat_cols,
-            'foto_url': 'r316c_url',
-            'kbli_label': kbli_label,
-            'kbli_value': None,
-            'wilayah_cols': ['prov', 'kab', 'kec', 'des', 'bs', 'sbs'],
-        }
-    else:
-        return {
-            'format': 'FASIH',
-            'nama_usaha': 'r213',
-            'feat_cols': [c for c in ['r215a1_label', 'r215b', 'r215d'] if c in df.columns],
-            'foto_url': 'r215c_url',
-            'kbli_label': 'r216_label',
-            'kbli_value': 'r216_value',
-            'wilayah_cols': ['r101', 'r102', 'r103', 'r104', 'r105', 'r106', 'r107'],
-        }
-
-# Pemeriksaan logis sesuai pedoman VIMK25-L2 (PPT)
-def check_vimk_rules(df, col_map):
-    """Pemeriksaan logis berdasarkan pedoman pemeriksaan VIMK25-L2."""
-    issues = []
-    for i, row in df.iterrows():
-        r = []
-
-        # --- Rule 1: R314 (Nama Usaha) wajib terisi ---
-        nama_col = col_map['nama_usaha']
-        if nama_col in df.columns:
-            val = str(row.get(nama_col, '')).strip()
-            if val in ('', 'nan', '-', '.'):
-                r.append("R314 Nama Usaha kosong")
-
-        # --- Rule 2: R304 – Penggunaan bangunan ---
-        if 'r304_value' in df.columns:
-            r304 = str(row.get('r304_value', '')).strip()
-            # r304_value = 1 atau 2 (khusus/campuran) -> harus ada usaha
-            if r304 not in ('', 'nan') and r304 in ('1', '2'):
-                # Jika r304 = 1 atau 2 tapi r308 bukan 1, berarti inkonsisten
-                if 'r308_value' in df.columns:
-                    r308 = str(row.get('r308_value', '')).strip()
-                    if r308 != '1':
-                        r.append("R304 khusus/campuran tapi R308 bukan ada usaha IMK")
-
-        # --- Rule 3: R316a/R316b (Kegiatan Utama) wajib terisi ---
-        for fc in col_map['feat_cols']:
-            pass  # dicek di level fitur teks
-        feat_text = ' '.join(str(row.get(fc, '')) for fc in col_map['feat_cols']).strip()
-        if feat_text in ('', 'nan') or len(feat_text) < 3:
-            r.append("Deskripsi kegiatan/produk kosong atau terlalu pendek")
-
-        # --- Rule 4: KBLI (R317/R216) wajib terisi ---
-        kbli_col = col_map['kbli_label']
-        if kbli_col and kbli_col in df.columns:
-            kbli_val = str(row.get(kbli_col, '')).strip()
-            if kbli_val in ('', 'nan', '-'):
-                r.append("Kode KBLI kosong")
-
-        # --- Rule 5: R310 – Jumlah ART ---
-        if 'r310_value' in df.columns:
-            r310 = str(row.get('r310_value', '')).strip()
-            if r310 not in ('', 'nan'):
-                try:
-                    r310_int = int(float(r310))
-                    if r310_int <= 0:
-                        r.append("R310 jumlah ART tidak wajar (<=0)")
-                except (ValueError, OverflowError):
-                    pass
-
-        # --- Rule 6: R311 – Jumlah kegiatan usaha ---
-        if 'r311_value' in df.columns:
-            r311 = str(row.get('r311_value', '')).strip()
-            if r311 not in ('', 'nan'):
-                try:
-                    r311_int = int(float(r311))
-                    if r311_int <= 0:
-                        r.append("R311 jumlah kegiatan usaha tidak wajar (<=0)")
-                except (ValueError, OverflowError):
-                    pass
-
-        issues.append("; ".join(r) if r else "")
-    return issues
 
 # ========= Proses utama =========
 
@@ -256,77 +157,30 @@ if uploaded_file is not None:
         if df[c].dtype == object:
             df[c] = df[c].astype(str).str.strip()
 
-    # Deteksi format data
-    col_map = detect_and_map_columns(df)
-    st.info(f"Format data terdeteksi: **{col_map['format']}**")
-
-    # Filter hanya data yang "SUBMITTED BY Pencacah"
-    if 'assignment_status_alias' in df.columns:
-        total_sebelum = len(df)
-        df = df[
-            df['assignment_status_alias'].str.upper() == 'SUBMITTED BY PENCACAH'
-        ].reset_index(drop=True)
-        total_sesudah = len(df)
-        st.info(
-            f"Filter: hanya data **SUBMITTED BY Pencacah**. "
-            f"{total_sesudah} dari {total_sebelum} baris diproses."
-        )
-        if total_sesudah == 0:
-            st.warning("Tidak ada data dengan status 'SUBMITTED BY Pencacah'.")
-            st.stop()
-    else:
-        st.warning(
-            "Kolom `assignment_status_alias` tidak ditemukan. "
-            "Semua data akan diproses tanpa filter status."
-        )
-
-    st.subheader("Preview data mentah (setelah filter)")
+    st.subheader("Preview data mentah")
     st.dataframe(df.head())
 
-    # Split nama usaha -> nama_bisnis / pemilik
-    nama_col = col_map['nama_usaha']
-    if nama_col in df.columns:
-        sp = split_business_owner(df[nama_col])
+    # Split r213 -> nama_bisnis / pemilik
+    if 'r213' in df.columns:
+        sp = split_business_owner(df['r213'])
         df = pd.concat([df, sp], axis=1)
 
-    # Target kbli2_true
-    feat_cols = col_map['feat_cols']
-    kbli_value_col = col_map.get('kbli_value')
-    kbli_label_col = col_map.get('kbli_label')
-
-    if kbli_value_col and kbli_value_col in df.columns:
-        df['kbli2_true'] = df[kbli_value_col].astype(str).str.extract(r'(\d{2})')
-    elif kbli_label_col and kbli_label_col in df.columns:
-        # Coba extract dari format "[XX] ..." atau langsung 2 digit awal
-        kbli_str = df[kbli_label_col].astype(str)
-        extracted = kbli_str.str.extract(r'\[(\d{2})\]')
-        # Jika format bracket tidak match, coba extract 2 digit pertama langsung
-        mask_na = extracted[0].isna()
-        if mask_na.any():
-            extracted.loc[mask_na, 0] = kbli_str[mask_na].str.extract(r'(\d{2})')[0]
-        df['kbli2_true'] = extracted[0]
+    # Target kbli2_true dari r216
+    if 'r216_value' in df.columns:
+        df['kbli2_true'] = df['r216_value'].astype(str).str.extract(r'(\d{2})')
+    elif 'r216_label' in df.columns:
+        df['kbli2_true'] = df['r216_label'].astype(str).str.extract(r'\[(\d{2})\]')
     else:
         df['kbli2_true'] = np.nan
 
     # Fitur teks
+    feat_cols = [c for c in ['r215a1_label', 'r215b', 'r215d'] if c in df.columns]
     if not feat_cols:
-        st.error("Tidak ditemukan kolom fitur teks (r215a1_label/r215b/r215d atau r316a_label/r316b/r316d).")
+        st.error("Tidak ditemukan kolom r215a1_label / r215b / r215d.")
         st.stop()
 
-    # Bersihkan 'nan'/'none' string yang muncul dari konversi astype(str)
-    df['text_all'] = (
-        df[feat_cols]
-        .fillna('')
-        .astype(str)
-        .apply(lambda col: col.str.replace(r'(?i)^nan$', '', regex=True))
-        .apply(lambda col: col.str.replace(r'(?i)^none$', '', regex=True))
-        .agg(' '.join, axis=1)
-        .str.strip()
-    )
+    df['text_all'] = df[feat_cols].fillna('').agg(' '.join, axis=1)
     X_all = df[['text_all']].copy()
-
-    # Dynamically set min_df based on dataset size
-    effective_min_df = max(1, min(3, len(X_all) // 10))
 
     # --------- Pipeline dasar ---------
     ct = ColumnTransformer(
@@ -334,7 +188,7 @@ if uploaded_file is not None:
             ('text', TfidfVectorizer(
                 lowercase=True,
                 ngram_range=(1, 2),
-                min_df=effective_min_df
+                min_df=3
             ), 'text_all')
         ],
         remainder='drop'
@@ -397,37 +251,20 @@ if uploaded_file is not None:
             best_model = pipe
             st.warning("Model dilatih tanpa split/grid (kelas jarang).")
     else:
-        best_model = None
-        try:
-            pipe.set_params(
-                clf__n_estimators=100,
-                clf__class_weight='balanced',
-                prep__text__min_df=1
-            )
-            pipe.fit(
-                X_all,
-                np.random.choice([f"{i:02d}" for i in range(10, 34)], size=len(X_all))
-            )
-            best_model = pipe
-            st.info("Tidak cukup label KBLI, model difit dummy agar bisa prediksi.")
-        except ValueError as e:
-            st.warning(
-                f"ML tidak bisa dijalankan ({e}). "
-                "Prediksi akan menggunakan rule-based saja."
-            )
+        pipe.set_params(clf__n_estimators=100, clf__class_weight='balanced')
+        pipe.fit(
+            X_all,
+            np.random.choice([f"{i:02d}" for i in range(10, 34)], size=len(X_all))
+        )
+        best_model = pipe
+        st.info("Tidak cukup label r216, model hanya difit dummy agar bisa prediksi.")
 
     # Prediksi + proba dengan best_model
-    if best_model is not None:
-        pred = best_model.predict(X_all)
-        if hasattr(best_model.named_steps['clf'], "predict_proba"):
-            proba = best_model.predict_proba(X_all).max(axis=1)
-        else:
-            proba = np.ones(len(X_all))
+    pred = best_model.predict(X_all)
+    if hasattr(best_model.named_steps['clf'], "predict_proba"):
+        proba = best_model.predict_proba(X_all).max(axis=1)
     else:
-        # Fallback: default ke '32' (Industri Pengolahan Lainnya) dgn proba rendah
-        # agar rule-based bisa mengoreksi nanti
-        pred = np.full(len(X_all), '32')
-        proba = np.full(len(X_all), 0.10)
+        proba = np.ones(len(X_all))
 
     out = df.copy()
     out['kbli2_pred'] = pred
@@ -437,64 +274,48 @@ if uploaded_file is not None:
     # Aturan iteratif pakai feat_cols
     out_iter = apply_iterative_rules_simple(out, feat_cols, max_iters=3, conf_thr=0.70)
 
-    # Kategori C dan status kesesuaian
+    # Kategori C dan status
     catC = [f"{i:02d}" for i in range(10, 34)]
     out_iter['is_catC_pred'] = out_iter['kbli2_pred'].isin(catC)
     out_iter['is_catC_true'] = out_iter['kbli2_true'].isin(catC)
 
-    # mismatch hanya jika ada ground truth DAN berbeda dengan prediksi
-    has_true = out_iter['kbli2_true'].notna()
-    mismatch = has_true & (out_iter['kbli2_true'] != out_iter['kbli2_pred'])
+    mismatch = out_iter['kbli2_true'].notna() & (out_iter['kbli2_true'] != out_iter['kbli2_pred'])
 
     out_iter['status_kesesuaian'] = np.where(
-        out_iter['is_catC_pred'] & has_true & out_iter['is_catC_true'] & (~mismatch),
-        'Sesuai C',
+        out_iter['is_catC_pred'] & out_iter['is_catC_true'] & (~mismatch), 'Sesuai C',
         np.where(
-            out_iter['is_catC_pred'] & (~has_true),
-            'Pred C (belum ada label)',
+            ~out_iter['is_catC_pred'] & out_iter['is_catC_true'], 'True C vs Pred non-C',
             np.where(
-                ~out_iter['is_catC_pred'] & out_iter['is_catC_true'],
-                'True C vs Pred non-C',
-                np.where(
-                    out_iter['is_catC_pred'] & has_true & ~out_iter['is_catC_true'],
-                    'True non-C vs Pred C',
-                    np.where(
-                        ~out_iter['is_catC_pred'] & (~has_true),
-                        'Pred non-C (belum ada label)',
-                        'Lainnya'
-                    )
-                )
+                out_iter['is_catC_pred'] & ~out_iter['is_catC_true'],
+                'True non-C vs Pred C',
+                'True non-C & Pred non-C'
             )
         )
     )
 
-    # Pemeriksaan logis sesuai pedoman VIMK25-L2
-    out_iter['pemeriksaan_logis'] = check_vimk_rules(out_iter, col_map)
-
-
+    # Flag baris yang tidak punya gambar (atau link bukan gambar)
+    if 'r215c_url' in out_iter.columns:
+        r215c_str = out_iter['r215c_url'].astype(str)
+        has_valid_image = r215c_str.apply(is_image_url)
+        no_image = ~has_valid_image      # True jika TIDAK ada gambar valid
+    else:
+        no_image = pd.Series(True, index=out_iter.index)
 
     # =====  Bagi output =====
     klasifikasi = out_iter.copy()
 
-    # Data BERSIH:
-    #   - Prediksi masuk kategori C (10-33)
-    #   - Jika ada ground truth (kbli2_true), harus sesuai (tidak mismatch)
-    #   - Lolos semua pemeriksaan logis VIMK25-L2
-    #   - Tanpa gambar tetap dianggap bersih
     bersih = out_iter.loc[
         out_iter['is_catC_pred']
+        & out_iter['is_catC_true']
         & (~mismatch)
-        & (out_iter['pemeriksaan_logis'] == '')  # lolos semua pemeriksaan logis
+        & (~no_image)          # wajib punya gambar valid
     ].copy()
 
-    # Data ANOMALI:
-    #   - Prediksi bukan kategori C, ATAU
-    #   - Ada mismatch prediksi vs ground truth, ATAU
-    #   - Gagal pemeriksaan logis VIMK25-L2
     anomali = out_iter.loc[
         (~out_iter['is_catC_pred'])
+        | (~out_iter['is_catC_true'])
         | mismatch
-        | (out_iter['pemeriksaan_logis'] != '')  # ada masalah pemeriksaan logis
+        | no_image             # tanpa gambar valid -> anomali
     ].copy()
 
     # Tambah alasan anomali
@@ -506,60 +327,51 @@ if uploaded_file is not None:
         elif row.get('kbli2_true') not in catC and row.get('kbli2_pred') in catC:
             r.append("True non-C vs Pred C")
         if pd.isna(row.get('kbli2_true')):
-            r.append("KBLI kosong")
-        # Tambah hasil pemeriksaan logis
-        logis = str(row.get('pemeriksaan_logis', ''))
-        if logis and logis != 'nan':
-            r.append(logis)
+            r.append("KBLI r216 kosong")
+        if no_image.loc[i]:
+            r.append("Tanpa gambar atau link non-gambar")
         reasons.append("; ".join(r) if r else "Periksa manual")
     anomali['alasan_anomali'] = reasons
 
     # =====  Kolom & urutan =====
-    # Kolom yang akan ditampilkan (adaptif sesuai format)
-    foto_col = col_map['foto_url']
-    kbli_col_display = col_map['kbli_label']
-    wilayah_cols = [c for c in col_map['wilayah_cols'] if c in df.columns]
-
-    base_cols_ba = (
-        wilayah_cols
-        + [nama_col]
-        + feat_cols
-        + ([kbli_col_display] if kbli_col_display and kbli_col_display in df.columns else [])
-        + ['kbli2_true', 'kbli2_pred', 'kbli2_pred_label',
-           'kbli2_pred_proba', 'status_kesesuaian', 'pemeriksaan_logis']
-        + ([foto_col] if foto_col and foto_col in df.columns else [])
-    )
-
+    base_cols_ba = [
+        'r101','r102','r103','r104','r105','r106','r107',
+        'r213',
+        'r215a1_label','r215b','r215d',
+        'r216_label',
+        'kbli2_true','kbli2_pred','kbli2_pred_label',
+        'kbli2_pred_proba','status_kesesuaian',
+        'r215c_url'
+    ]
     for dfx in [bersih, anomali]:
         for col in base_cols_ba:
             if col not in dfx.columns and col in df.columns:
                 dfx[col] = df[col]
 
-    ordered_cols = base_cols_ba.copy()
+    ordered_cols = [
+        'r101','r102','r103','r104','r105','r106','r107',
+        'r213',
+        'r215a1_label','r215b','r215d',
+        'r216_label',
+        'kbli2_true','kbli2_pred','kbli2_pred_label',
+        'kbli2_pred_proba','status_kesesuaian',
+        'r215c_url'
+    ]
 
     klasifikasi_cols = [c for c in ordered_cols if c in klasifikasi.columns]
     bersih_cols      = [c for c in ordered_cols if c in bersih.columns]
     anomali_cols     = [c for c in ordered_cols if c in anomali.columns] + ['alasan_anomali']
 
     def view_cols(dfv, cols):
-        if foto_col and foto_col in cols:
-            if dfv[foto_col].astype(str).str.strip().eq('').all():
-                return [c for c in cols if c != foto_col]
+        if 'r215c_url' in cols and dfv['r215c_url'].astype(str).str.strip().eq('').all():
+            return [c for c in cols if c != 'r215c_url']
         return cols
 
     klasifikasi_view = view_cols(klasifikasi, klasifikasi_cols)
     bersih_view      = view_cols(bersih, bersih_cols)
     anomali_view     = view_cols(anomali, anomali_cols)
 
-    # =====  Ringkasan =====
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Data", len(klasifikasi))
-    with col2:
-        st.metric("Data Bersih", len(bersih))
-    with col3:
-        st.metric("Data Anomali", len(anomali))
-
+    # =====  Ringkasan akurasi (proporsi Sesuai C) =====
     if 'status_kesesuaian' in klasifikasi.columns:
         total_labeled = (klasifikasi['kbli2_true'].notna()).sum()
         sesuai_c = (klasifikasi['status_kesesuaian'] == 'Sesuai C').sum()
@@ -568,20 +380,14 @@ if uploaded_file is not None:
             st.metric("Proporsi 'Sesuai C' (KBLI 2 digit)", f"{akurasi:.1%}")
 
     # =====  Tampilkan di halaman =====
-    st.subheader("Data klasifikasi (lengkap)")
-    st.dataframe(klasifikasi[klasifikasi_view].head(20))
+    st.subheader("Data klasifikasi (lengkap, hanya urutan kolom diatur)")
+    st.dataframe(klasifikasi[klasifikasi_view].head())
 
-    st.subheader("Data bersih (Prediksi Kategori C + lolos pemeriksaan logis)")
-    if len(bersih) > 0:
-        st.dataframe(bersih[bersih_view].head(20))
-    else:
-        st.warning("Tidak ada data yang memenuhi kriteria bersih.")
+    st.subheader("Data bersih (C sesuai & punya gambar)")
+    st.dataframe(bersih[bersih_view].head())
 
-    st.subheader("Data anomali (non‑C / mismatch / gagal pemeriksaan logis)")
-    if len(anomali) > 0:
-        st.dataframe(anomali[anomali_view].head(20))
-    else:
-        st.success("Tidak ada data anomali ditemukan.")
+    st.subheader("Data anomali (non‑C / mismatch / tanpa gambar)")
+    st.dataframe(anomali[anomali_view].head())
 
     # =====  Download CSV =====
     klasifikasi_csv = klasifikasi[klasifikasi_cols].to_csv(index=False).encode("utf-8")
@@ -589,21 +395,21 @@ if uploaded_file is not None:
     anomali_csv     = anomali[anomali_cols].to_csv(index=False).encode("utf-8")
 
     st.download_button(
-        "Download klasifikasi.csv",
+        "Download klasifikasi_r216_vs_textC.csv",
         data=klasifikasi_csv,
-        file_name="klasifikasi_kbli.csv",
+        file_name="klasifikasi_r216_vs_textC.csv",
         mime="text/csv"
     )
     st.download_button(
-        "Download data_bersih.csv",
+        "Download bersih_textC.csv",
         data=bersih_csv,
-        file_name="data_bersih.csv",
+        file_name="bersih_textC.csv",
         mime="text/csv"
     )
     st.download_button(
-        "Download data_anomali.csv",
+        "Download anomali_kbli.csv",
         data=anomali_csv,
-        file_name="data_anomali.csv",
+        file_name="anomali_kbli.csv",
         mime="text/csv"
     )
 
