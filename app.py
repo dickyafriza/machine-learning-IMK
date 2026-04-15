@@ -397,9 +397,8 @@ if uploaded_file is not None:
             best_model = pipe
             st.warning("Model dilatih tanpa split/grid (kelas jarang).")
     else:
-        # Cek apakah ada teks yang cukup bermakna untuk TF-IDF
-        non_empty_text = X_all['text_all'].str.strip().replace('', np.nan).dropna()
-        if len(non_empty_text) >= 2:
+        best_model = None
+        try:
             pipe.set_params(
                 clf__n_estimators=100,
                 clf__class_weight='balanced',
@@ -411,11 +410,9 @@ if uploaded_file is not None:
             )
             best_model = pipe
             st.info("Tidak cukup label KBLI, model difit dummy agar bisa prediksi.")
-        else:
-            # Teks terlalu sedikit/kosong, tidak bisa TF-IDF → skip ML
-            best_model = None
+        except ValueError as e:
             st.warning(
-                "Teks deskripsi terlalu sedikit/kosong untuk diproses ML. "
+                f"ML tidak bisa dijalankan ({e}). "
                 "Prediksi akan menggunakan rule-based saja."
             )
 
