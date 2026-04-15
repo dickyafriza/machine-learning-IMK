@@ -313,7 +313,16 @@ if uploaded_file is not None:
         st.error("Tidak ditemukan kolom fitur teks (r215a1_label/r215b/r215d atau r316a_label/r316b/r316d).")
         st.stop()
 
-    df['text_all'] = df[feat_cols].fillna('').agg(' '.join, axis=1)
+    # Bersihkan 'nan'/'none' string yang muncul dari konversi astype(str)
+    df['text_all'] = (
+        df[feat_cols]
+        .fillna('')
+        .astype(str)
+        .apply(lambda col: col.str.replace(r'(?i)^nan$', '', regex=True))
+        .apply(lambda col: col.str.replace(r'(?i)^none$', '', regex=True))
+        .agg(' '.join, axis=1)
+        .str.strip()
+    )
     X_all = df[['text_all']].copy()
 
     # Dynamically set min_df based on dataset size
@@ -388,14 +397,27 @@ if uploaded_file is not None:
             best_model = pipe
             st.warning("Model dilatih tanpa split/grid (kelas jarang).")
     else:
-        pipe.set_params(clf__n_estimators=100, clf__class_weight='balanced',
-                        prep__text__min_df=1)
-        pipe.fit(
-            X_all,
-            np.random.choice([f"{i:02d}" for i in range(10, 34)], size=len(X_all))
-        )
-        best_model = pipe
-        st.info("Tidak cukup label KBLI, model hanya difit dummy agar bisa prediksi.")
+        # Cek apakah ada teks yang cukup bermakna untuk TF-IDF
+        non_empty_text = X_all['text_all'].str.strip().replace('', np.nan).dropna()
+        if len(non_empty_text) >= 2:
+            pipe.set_params(
+                clf__n_estimators=100,
+                clf__class_weight='balanced',
+                prep__text__min_df=1
+            )
+            pipe.fit(
+                X_all,
+                np.random.choice([f"{i:02d}" for i in range(10, 34)], size=len(X_all))
+            )
+            best_model = pipe
+            st.info("Tidak cukup label KBLI, model difit dummy agar bisa prediksi.")
+        else:
+            # Teks terlalu sedikit/kosong, tidak bisa TF-IDF → skip ML
+            best_model = None
+            st.warning(
+                "Teks deskripsi terlalu sedikit/kosong untuk diproses ML. "
+                "Prediksi akan menggunakan rule-based saja."
+            )
 
     # Prediksi + proba dengan best_model
     pred = best_model.predict(X_all)
