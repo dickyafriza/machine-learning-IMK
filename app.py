@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import re
 import chardet
+import random
 from io import StringIO
 
 from sklearn.model_selection import train_test_split, GridSearchCV
@@ -100,6 +101,78 @@ def apply_iterative_rules_simple(df, cols, max_iters=3, conf_thr=0.70):
                 out2.loc[m, 'kbli2_pred_label'] = out2.loc[m, 'kbli2_pred'].map(label_map)
                 changed = True
     return out2
+
+# ========= Augmentasi Teks =========
+
+def augment_text(text: str, method: str = 'delete', p: float = 0.15) -> str:
+    """
+    Augmentasi satu teks dengan dua strategi:
+    - 'delete' : hapus setiap kata dengan probabilitas p
+    - 'swap'   : tukar posisi int(len*p) pasang kata secara acak
+    """
+    words = str(text).split()
+    if len(words) < 2:
+        return text
+
+    if method == 'delete':
+        kept = [w for w in words if random.random() > p]
+        return ' '.join(kept) if kept else text
+
+    elif method == 'swap':
+        n_swaps = max(1, int(len(words) * p))
+        for _ in range(n_swaps):
+            i, j = random.sample(range(len(words)), 2)
+            words[i], words[j] = words[j], words[i]
+        return ' '.join(words)
+
+    return text
+
+
+def augment_training_data(
+    X_tr: pd.DataFrame,
+    y_tr: pd.Series,
+    target_ratio: float = 0.6,
+    p: float = 0.15,
+    seed: int = 42
+) -> tuple:
+    """
+    Augmentasi data training untuk kelas minoritas.
+    Kelas dengan jumlah sampel < median * target_ratio akan ditambah
+    sampai mencapai threshold tersebut menggunakan word-delete & word-swap.
+
+    Returns: (X_augmented, y_augmented)
+    """
+    random.seed(seed)
+
+    counts      = y_tr.value_counts()
+    threshold   = int(counts.median() * target_ratio)
+    minor_cls   = counts[counts < threshold].index.tolist()
+
+    X_extra, y_extra = [], []
+
+    for cls in minor_cls:
+        mask      = (y_tr == cls)
+        texts_cls = X_tr.loc[mask, 'text_all'].tolist()
+        n_needed  = threshold - len(texts_cls)
+
+        methods = ['delete', 'swap']
+        for k in range(n_needed):
+            src    = random.choice(texts_cls)
+            method = methods[k % 2]           # alternasi delete / swap
+            aug    = augment_text(src, method=method, p=p)
+            X_extra.append({'text_all': aug})
+            y_extra.append(cls)
+
+    if not X_extra:
+        return X_tr, y_tr
+
+    X_aug = pd.concat(
+        [X_tr, pd.DataFrame(X_extra)], ignore_index=True
+    )
+    y_aug = pd.concat(
+        [y_tr, pd.Series(y_extra, dtype=y_tr.dtype)], ignore_index=True
+    )
+    return X_aug, y_aug
 
 # cek apakah URL mengarah ke file gambar (foto produk)
 def is_image_url(url: str) -> bool:
@@ -238,7 +311,15 @@ if uploaded_file is not None:
                 stratify=y_t[ok]
             )
 
-            grid.fit(X_tr, y_tr)
+            # ---- Augmentasi kelas minoritas sebelum training ----
+            X_tr_aug, y_tr_aug = augment_training_data(
+                X_tr, y_tr, target_ratio=0.6, p=0.15
+            )
+            st.info(
+                f"Augmentasi: {len(X_tr)} → {len(X_tr_aug)} sampel training "
+                f"(+{len(X_tr_aug)-len(X_tr)} sintetis)"
+            )
+            grid.fit(X_tr_aug, y_tr_aug)
 
             st.success("Model dilatih dengan GridSearchCV (TF-IDF + RandomForest).")
             st.write("Best params:", grid.best_params_)
