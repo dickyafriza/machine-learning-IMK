@@ -16,7 +16,7 @@ import chardet
 import time
 from io import StringIO
 
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, KFold
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -226,7 +226,7 @@ if uploaded_file is not None:
         rf_grid = GridSearchCV(
             estimator=rf_pipe,
             param_grid=rf_param_grid,
-            cv=3, n_jobs=-1, verbose=0, scoring='accuracy'
+            cv=KFold(n_splits=3, shuffle=True, random_state=42), n_jobs=-1, verbose=0, scoring='accuracy'
         )
 
         t0 = time.time()
@@ -272,7 +272,7 @@ if uploaded_file is not None:
         knn_grid = GridSearchCV(
             estimator=knn_pipe,
             param_grid=knn_param_grid,
-            cv=3, n_jobs=-1, verbose=0, scoring='accuracy'
+            cv=KFold(n_splits=3, shuffle=True, random_state=42), n_jobs=-1, verbose=0, scoring='accuracy'
         )
 
         t0 = time.time()
@@ -353,8 +353,8 @@ if uploaded_file is not None:
     st.subheader("🔄 Cross-Validation (5-Fold) pada Seluruh Data Berlabel")
 
     with st.spinner("Running 5-fold CV..."):
-        rf_cv = cross_val_score(rf_best, X, y, cv=5, scoring='accuracy', n_jobs=-1)
-        knn_cv = cross_val_score(knn_best, X, y, cv=5, scoring='accuracy', n_jobs=-1)
+        rf_cv = cross_val_score(rf_best, X, y, cv=KFold(n_splits=5, shuffle=True, random_state=42), scoring='accuracy', n_jobs=-1)
+        knn_cv = cross_val_score(knn_best, X, y, cv=KFold(n_splits=5, shuffle=True, random_state=42), scoring='accuracy', n_jobs=-1)
 
     cv_df = pd.DataFrame({
         'Fold': [f"Fold {i+1}" for i in range(5)] + ['Mean', 'Std'],
